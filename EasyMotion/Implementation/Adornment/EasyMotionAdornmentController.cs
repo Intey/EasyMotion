@@ -58,13 +58,15 @@ namespace EasyMotion.Implementation.Adornment
         private void OnStateChanged(object sender, EventArgs e)
         {
             if (_easyMotionUtil.State == EasyMotionState.LookingForDecision)
-            {
-                AddAdornments();
-            }
-            else
-            {
-                _adornmentLayer.RemoveAdornmentsByTag(_tag);
-            }
+
+                AddAdornmentsForPage();
+            else 
+                clearAdornmentLayer();
+        }
+
+        private void clearAdornmentLayer()
+        {
+            _adornmentLayer.RemoveAdornmentsByTag(_tag);
         }
 
         private void OnLayoutChanged(object sender, EventArgs e)
@@ -83,8 +85,20 @@ namespace EasyMotion.Implementation.Adornment
 
         private void ResetAdornments()
         {
+            var adorn = _adornmentLayer.Elements.Where(x => x.Tag == _tag);
             _adornmentLayer.RemoveAdornmentsByTag(_tag);
-            AddAdornments();
+
+            foreach (var np in _navigateMap)
+            {
+                try
+                {
+                    //catch if user scroll layout so that one point going out of screen.
+                    var bounds = _wpfTextView.TextViewLines.GetCharacterBounds(np.Value); //error appear there.
+                    var hotSpotUI = CreateHotSpotUI(np);
+                    _adornmentLayer.AddAdornment(new SnapshotSpan(np.Value, 1), _tag, hotSpotUI);
+                }
+                catch { /* no action */ }
+            }
         }
 
         private void AddAdornments()
@@ -102,6 +116,17 @@ namespace EasyMotion.Implementation.Adornment
             var endPoint = textViewLines.LastVisibleLine.End;
             var snapshot = startPoint.Snapshot;
             int navigateIndex = 0;
+
+            int ss_count = startPoint.Position - endPoint.Position;
+            if (ss_count > NavigationKeys.Length)
+            {
+                //TODO: create groups
+            }
+            /* CONCEPT:
+             * Creating places(hotspot) for step with hotkey depends on dictionary. 
+             * When count of points(that needs to be marked with hotspot) greater
+             * then dictionary length, should use grouping.
+             */
             for (int i = startPoint.Position; i < endPoint.Position; i++)
             {
                 var point = new SnapshotPoint(snapshot, i);
@@ -124,28 +149,49 @@ namespace EasyMotion.Implementation.Adornment
         {
             _navigateMap[key] = point;
 
-            var resourceDictionary = _editorFormatMap.GetProperties(EasyMotionNavigateFormatDefinition.Name);
+            //_newNavigateMap[point] = key;
 
             var span = new SnapshotSpan(point, 1);
-            var bounds = textViewLines.GetCharacterBounds(point);
+            var hotSpotUI = CreateHotSpotUI(point, key);
 
+            _adornmentLayer.AddAdornment(span, _tag, hotSpotUI);
+        }
+
+        private TextBox CreateHotSpotUI(SnapshotPoint point, string key)
+        {
+            var bounds = _wpfTextView.TextViewLines.GetCharacterBounds(point);
             var textBox = new TextBox();
             textBox.Text = key;
             textBox.FontFamily = _classificationFormatMap.DefaultTextProperties.Typeface.FontFamily;
-            textBox.Foreground = resourceDictionary.GetForegroundBrush(EasyMotionNavigateFormatDefinition.DefaultForegroundBrush);
-            textBox.Background = resourceDictionary.GetBackgroundBrush(EasyMotionNavigateFormatDefinition.DefaultBackgroundBrush);
-            textBox.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            textBox.Foreground = _editorFormatMap.GetProperties(EasyMotionNavigateFormatDefinition.Name).
+                GetForegroundBrush(EasyMotionNavigateFormatDefinition.DefaultForegroundBrush);
+            textBox.Background = _editorFormatMap.GetProperties(EasyMotionNavigateFormatDefinition.Name).
+                GetBackgroundBrush(EasyMotionNavigateFormatDefinition.DefaultBackgroundBrush);
 
+            textBox.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             Canvas.SetTop(textBox, bounds.TextTop);
             Canvas.SetLeft(textBox, bounds.Left);
             Canvas.SetZIndex(textBox, 10);
-
-            _adornmentLayer.AddAdornment(span, _tag, textBox);
+            return textBox;
+        }
+        private TextBox CreateHotSpotUI(KeyValuePair<string, SnapshotPoint> hotspot)
+        {
+            return CreateHotSpotUI(hotspot.Value, hotspot.Key);
         }
 
         public bool NavigateTo(string key)
         {
             SnapshotPoint point;
+
+            var NavigateGroup = _newNavigateMap.Where(e => e.Value == key);
+            if (NavigateGroup.Count() > 1)
+            {
+                _adornmentLayer.RemoveAdornmentsByTag(_tag);
+                //ResetAdornments();
+                //AddAdornments(NavigateGroup.First().Key, NavigateGroup.Last().Key);
+                //_easyMotionUtil.ChangeToLookingForChar();
+            }
+
             if (!_navigateMap.TryGetValue(key, out point))
             {
                 return false;
