@@ -16,7 +16,7 @@ namespace EasyMotion.Implementation.Adornment
 {
     internal sealed class EasyMotionAdornmentController : IEasyMotionNavigator
     {
-        private static readonly string[] NavigationKeys =
+        private static readonly string[] NavigationDict =
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
             .Select(x => x.ToString())
             .ToArray();
@@ -90,24 +90,14 @@ namespace EasyMotion.Implementation.Adornment
             _adornmentLayer.RemoveAdornmentsByTag(_tag);
 
             foreach (var keypoint in _navigateMap)
-                addAdornmentPoint(keypoint);
+                addAdornmentPoint(keypoint.Key, keypoint.Value);
             foreach (var group in _navigateGroups)
                 foreach (var point in group.Value)
                     addAdornmentPoint(group.Key, point);
         }
-        
-        private void addAdornmentPoint(KeyValuePair<string, SnapshotPoint> point)
-        {
-            addAdornmentPoint(point.Key, point.Value);
-        }
-        private void addAdornmentPoint(string key, SnapshotPoint point)
-        {
-            var hotSpotUI = CreateHotSpotUI(point, key); 
-            if (hotSpotUI == null) return;
-            _adornmentLayer.AddAdornment(new SnapshotSpan(point, 1), _tag, hotSpotUI);
-        }
 
-        private void AddAdornments()
+        //creats view blocks on each founded key
+        private void AddAdornmentsForPage()
         {
             Debug.Assert(_easyMotionUtil.State == EasyMotionState.LookingForDecision);
 
@@ -126,41 +116,38 @@ namespace EasyMotion.Implementation.Adornment
 
         private void AddAdornments(SnapshotPoint startPoint, SnapshotPoint endPoint)
         {
-            var snapshot = startPoint.Snapshot;
-            int navigateIndex = 0;
-            int ss_count = startPoint.Position - endPoint.Position;
-
-            if (ss_count > NavigationKeys.Length) 
-            {
-                /*TODO: create groups */
-            }                                        
             /* CONCEPT:
              * Creating places(hotspot) for step with hotkey depends on dictionary. 
              * When count of points(that needs to be marked with hotspot) greater
              * then dictionary length, should use grouping.
              */
+            var snapshot = startPoint.Snapshot;
+            int navigateIndex = 0;
 
-            int hotspots_c = endPoint.Position - startPoint.Position;
-            int keys_c = NavigationKeys.Length;
-            int groups_count = (hotspots_c - keys_c) / keys_c;
+            int hotspots_count = startPoint.Position - endPoint.Position;
+            int dict_size = NavigationDict.Length;
+            int groups_count = (hotspots_count - dict_size) / dict_size;
 
             for (int i = startPoint.Position; i < endPoint.Position; i++)
             {
                 var point = new SnapshotPoint(snapshot, i);
                 //TODO: use case sensivity
-                if (Char.ToLower(point.GetChar()) == Char.ToLower(_easyMotionUtil.TargetChar)
-                  && navigateIndex < keys_c - groups_count) //FIXME: no depends to keys dict length.
-                //SHOULD: split characters in groups
+                if (isCharMatch(point /*, caseSens? */))
                 {
-                    string key = NavigationKeys[navigateIndex];
-                    navigateIndex++;
-                    AddNavigateToPoint(point, key);
+                    string key = NavigationDict[navigateIndex];
+
+                    if (navigateIndex < dict_size - groups_count)
+                    {
+                        navigateIndex++;
+                        _navigateMap[key] = point;
+                        addAdornmentPoint(key, point);
+                    }
+                    else // groups
+                    {
+
+                    }
                 }
-                else
-                {
-                    //string key = NavigationKeys.Last(); //FIXME
-                    //AddNavigateToPoint(point, key);
-                }
+
             }
             if (navigateIndex == 0)
             {
@@ -168,22 +155,41 @@ namespace EasyMotion.Implementation.Adornment
             }
         }
 
-        private void AddNavigateToPoint(IWpfTextViewLineCollection textViewLines, SnapshotPoint point, string key)
+        public bool NavigateTo(string key)
         {
-            _navigateMap[key] = point;
+            //how-to navigate?             
+            var NavigateGroup = _navigateGroups.Where(e => e.Key == key);
+            if (NavigateGroup.Count() > 1)
+            {
+                _adornmentLayer.RemoveAdornmentsByTag(_tag);
+                foreach (var keygroup in NavigateGroup)
+                {
+                        
+                }
 
-            //_newNavigateMap[point] = key;
+                _easyMotionUtil.ChangeToLookingForChar();
+            }
 
-            var span = new SnapshotSpan(point, 1);
-            var hotSpotUI = CreateHotSpotUI(point, key) ;
+            SnapshotPoint point;
+            if (!_navigateMap.TryGetValue(key, out point))
+            {
+                return false;
+            }
+
+            if (point.Snapshot != _wpfTextView.TextSnapshot)
+            {
+                return false;
+            }
+            _wpfTextView.Caret.MoveTo(point);
+            return true;
+        }
+        private void addAdornmentPoint(string key, SnapshotPoint point)
+        {
+            var hotSpotUI = CreateHotSpotUI(point, key);
             if (hotSpotUI == null) return;
-            _adornmentLayer.AddAdornment(span, _tag, hotSpotUI);
+            _adornmentLayer.AddAdornment(new SnapshotSpan(point, 1), _tag, hotSpotUI);
         }
 
-        private TextBox CreateHotSpotUI(KeyValuePair<string, SnapshotPoint> hotspot)
-        {
-            return CreateHotSpotUI(hotspot.Value, hotspot.Key);
-        }
         private TextBox CreateHotSpotUI(SnapshotPoint point, string key)
         {
             TextBounds bounds;
@@ -204,34 +210,11 @@ namespace EasyMotion.Implementation.Adornment
             Canvas.SetZIndex(textBox, 10);
             return textBox;
         }
-        public bool NavigateTo(string key)
+        private bool isCharMatch(SnapshotPoint point, bool caseSens = false)
         {
-
-            var NavigateGroup = _navigateGroups.Where(e => e.Key == key);
-            if (NavigateGroup.Count() > 1)
-            {
-                _adornmentLayer.RemoveAdornmentsByTag(_tag);
-                foreach (var keygroup in NavigateGroup)
-                {
-                       //CreateHotSpotUI()
-                }
-
-                _easyMotionUtil.ChangeToLookingForChar();
-            }
-
-            SnapshotPoint point;
-            if (!_navigateMap.TryGetValue(key, out point))
-            {
-                return false;
-            }
-
-            if (point.Snapshot != _wpfTextView.TextSnapshot)
-            {
-                return false;
-            }
-
-            _wpfTextView.Caret.MoveTo(point);
-            return true;
+            if (caseSens) return point.GetChar() == _easyMotionUtil.TargetChar;
+            else return Char.ToLower(point.GetChar()) == Char.ToLower(_easyMotionUtil.TargetChar);
         }
+
     }
 }
