@@ -88,15 +88,13 @@ namespace EasyMotion.Implementation.Adornment
         private void ResetAdornments()
         {
             _adornmentLayer.RemoveAdornmentsByTag(_tag);
-            try
-            {
-                foreach (var keypoint in _navigateMap)
-                    addAdornmentPoint(keypoint.Key, keypoint.Value);
-                foreach (var group in navigator)
-                    foreach (var point in group.Value)
-                        addAdornmentPoint(group.Key, point);
-            }
-            catch {/* nop */}
+
+            foreach (var keypoint in _navigateMap)
+                addAdornmentPoint(keypoint.Key, keypoint.Value);
+            foreach (var group in navigator)
+                foreach (var point in group.Value)
+                    addAdornmentPoint(group.Key, point);
+
         }
 
         //creats view blocks on each founded key
@@ -240,21 +238,29 @@ namespace EasyMotion.Implementation.Adornment
             TextBounds bounds;
             //BUG: when we invoke EasyMotion, it go to state LookingForChar, then we scroll down (caret out of bounds)
             //then press char - it crash. 
-            bounds = _wpfTextView.TextViewLines.GetCharacterBounds(point);
+            try
+            {
+                bounds = _wpfTextView.TextViewLines.GetCharacterBounds(point);
+                var textBox = new TextBox();
+                textBox.Text = key;
+                textBox.FontFamily = _classificationFormatMap.DefaultTextProperties.Typeface.FontFamily;
+                textBox.Foreground = _editorFormatMap.GetProperties(EasyMotionNavigateFormatDefinition.Name).
+                    GetForegroundBrush(EasyMotionNavigateFormatDefinition.DefaultForegroundBrush);
+                textBox.Background = _editorFormatMap.GetProperties(EasyMotionNavigateFormatDefinition.Name).
+                    GetBackgroundBrush(EasyMotionNavigateFormatDefinition.DefaultBackgroundBrush);
 
-            var textBox = new TextBox();
-            textBox.Text = key;
-            textBox.FontFamily = _classificationFormatMap.DefaultTextProperties.Typeface.FontFamily;
-            textBox.Foreground = _editorFormatMap.GetProperties(EasyMotionNavigateFormatDefinition.Name).
-                GetForegroundBrush(EasyMotionNavigateFormatDefinition.DefaultForegroundBrush);
-            textBox.Background = _editorFormatMap.GetProperties(EasyMotionNavigateFormatDefinition.Name).
-                GetBackgroundBrush(EasyMotionNavigateFormatDefinition.DefaultBackgroundBrush);
+                textBox.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                Canvas.SetTop(textBox, bounds.TextTop);
+                Canvas.SetLeft(textBox, bounds.Left);
+                Canvas.SetZIndex(textBox, 10);
+                return textBox;
+            }
+            catch (System.ArgumentOutOfRangeException ex)
+            {
+                var textBox = new TextBox();
+                return textBox;
+            }
 
-            textBox.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            Canvas.SetTop(textBox, bounds.TextTop);
-            Canvas.SetLeft(textBox, bounds.Left);
-            Canvas.SetZIndex(textBox, 10);
-            return textBox;
         }
         private bool isCharMatch(SnapshotPoint point, bool caseSens = false)
         {
