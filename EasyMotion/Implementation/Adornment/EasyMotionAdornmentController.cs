@@ -27,7 +27,7 @@ namespace EasyMotion.Implementation.Adornment
         private readonly IClassificationFormatMap _classificationFormatMap;
         private readonly Dictionary<string, SnapshotPoint> _navigateMap = new Dictionary<string, SnapshotPoint>();
 
-        private readonly Dictionary<string, List<SnapshotPoint>> _navigateGroups = new Dictionary<string, List<SnapshotPoint>>();
+        private readonly Dictionary<string, List<SnapshotPoint>> navigator = new Dictionary<string, List<SnapshotPoint>>();
 
         private readonly object _tag = new object();
         private IAdornmentLayer _adornmentLayer;
@@ -92,7 +92,7 @@ namespace EasyMotion.Implementation.Adornment
             {
                 foreach (var keypoint in _navigateMap)
                     addAdornmentPoint(keypoint.Key, keypoint.Value);
-                foreach (var group in _navigateGroups)
+                foreach (var group in navigator)
                     foreach (var point in group.Value)
                         addAdornmentPoint(group.Key, point);
             }
@@ -107,9 +107,11 @@ namespace EasyMotion.Implementation.Adornment
 
             if (_wpfTextView.InLayout) { return; }
             _navigateMap.Clear();
+            navigator.Clear();
 
             var textViewLines = _wpfTextView.TextViewLines;
             //create point below caret
+            //FIXME: if caret out of bounds - use first line.
             var startPoint = _wpfTextView.Caret.Position.BufferPosition; //textViewLines.FirstVisibleLine.Start;
             var endPoint = textViewLines.LastVisibleLine.End;
 
@@ -125,56 +127,53 @@ namespace EasyMotion.Implementation.Adornment
              * then dictionary length, should use grouping.
              */
 
- 
-
-
-
             int dictSize = NavigationDict.Length;
             //find points
             List<SnapshotPoint> hotSpots = findHotSpots(startPoint, endPoint);
-
-            //int groups_count = points.Count / dict_size;
-            int groupSize = dictSize;
             int hotSpotsCount = hotSpots.Count;
-            int singles = dictSize < hotSpotsCount ? dictSize : hotSpotsCount;
-            int rest = hotSpotsCount - groupSize;
 
-            if (rest > 0)
-            {
-                groupSize = hotSpotsCount / groupSize;
-                singles -= groupSize;
-            }
-
-            int idx = 0;
-            string key = NavigationDict[idx++];
-            addNavigationForSingles(hotSpots);
-
-                        
-            foreach (var point in hotSpots)
-            {
-                _navigateMap[key] = point;
-                addAdornmentPoint(key, point);
-                //groups
-                key = NavigationDict[idx];
-                _navigateGroups[key] = new List<SnapshotPoint>(point);
-                _navigateGroups[key].Add(point);
-            }
-
-            if (idx == 0)
+            if (hotSpotsCount == 0)
             {
                 _easyMotionUtil.ChangeToLookingCharNotFound();
+                return;
+            }
+
+            int groupSize = dictSize;
+            int dict_size = NavigationDict.Length;
+            int groups_count = hotSpotsCount / dict_size
+                + (hotSpotsCount % dict_size > 0 ? 1 : 0);
+            int singles = dictSize < hotSpotsCount ? dictSize - groups_count : hotSpotsCount;
+
+            int key_idx = 0;
+            try
+            {
+                for (int i = 0; i < hotSpotsCount; ++i)
+                {
+                    string key = NavigationDict[key_idx];
+                    addAdornmentPoint(key, hotSpots[i]);//create view
+                    addToNavigator(key, hotSpots[i]);//create link
+                    //increasing index if i < singles, otherwise - on each group change
+                    if (i < singles)
+                        key_idx++;
+                    else if (i % groupSize == 0)
+                        key_idx++;
+                }
+            }
+            catch
+            { }
+        }
+
+        private void addToNavigator(string k, SnapshotPoint p)
+        {
+            if (navigator.ContainsKey(k))
+                navigator[k].Add(p);
+            else
+            {
+                navigator[k] = new List<SnapshotPoint>();
+                navigator[k].Add(p);
             }
         }
 
-        private void addNavigationForSingles(List<SnapshotPoint> points)
-        {
-            int dict_size = NavigationDict.Length;
-            int groups_count = points.Count / dict_size;
-            for (int i = 0; i < dict_size - groups_count; ++i)
-            {
-                _navigateMap[NavigationDict[i]] = points[i];
-            }
-        }
         private List<SnapshotPoint> findHotSpots(SnapshotPoint startPoint, SnapshotPoint endPoint)
         {
             //????
@@ -193,35 +192,47 @@ namespace EasyMotion.Implementation.Adornment
 
         public bool NavigateTo(string key)
         {
-            //how-to navigate?             
-            //var NavigateGroup = _navigateGroups.First(e => e.Key == key);
-            //if (NavigateGroup.Value != null)
-            //{
-            //    _adornmentLayer.RemoveAdornmentsByTag(_tag);
-            //    AddAdornmentsRegion(NavigateGroup.Value.First(), NavigateGroup.Value.Last());
-            //    //_easyMotionUtil.ChangeToLookingForChar();
-            //    return false;
-            //}
-
-
+            List<SnapshotPoint> points;
             SnapshotPoint point;
-            if (!_navigateMap.TryGetValue(key, out point))
+            //use First() because navigator may not contains searching key. 
+            //When groups not realized, used TryGetValue() on Dictionary<string,SnapshotPoint>
+            //FIXED[UNEXIST-GROUP-CHAR]: when call unexist char of grouped - can't get first
+            var maybeGroup = navigator.FirstOrDefault(e => e.Key == key);
+            if (maybeGroup.Value == null)
             {
+                _easyMotionUtil.ChangeToLookingCharNotFound();
                 return false;
             }
-
-            if (point.Snapshot != _wpfTextView.TextSnapshot)
+            //if it have many points(user want go to the group) refresh layer,
+            //refill points with new keys
+            if (maybeGroup.Value.Count > 1)
             {
+                navigator.Clear();
+                clearAdornmentLayer();
+                AddAdornmentsRegion(maybeGroup.Value.First(), maybeGroup.Value.Last());
+                //we are not navigated.
                 return false;
             }
-            _wpfTextView.Caret.MoveTo(point);
-            return true;
+            else
+            {
+                navigator.TryGetValue(key, out points);
+                if (points.Count != 1) return false;
+                point = points[0];
+                //ISIT: for case, when hotspot out of screen(scrolled) ?
+                if (point.Snapshot != _wpfTextView.TextSnapshot)
+                {
+                    return false;
+                }
+                _wpfTextView.Caret.MoveTo(point);
+                return true;
+            }
         }
 
         private void addAdornmentPoint(string key, SnapshotPoint point)
         {
             var hotSpotUI = CreateHotSpotUI(point, key);
-            if (hotSpotUI == null) return;
+            if (hotSpotUI == null)
+                return;
             _adornmentLayer.AddAdornment(new SnapshotSpan(point, 1), _tag, hotSpotUI);
         }
 
@@ -229,6 +240,9 @@ namespace EasyMotion.Implementation.Adornment
         {
             TextBounds bounds;
             //catch if user scroll layout so that one point going out of screen.
+            //BUG(only with grouped hotspots): if user scroll layout so that one point going out of screen
+            //BUG: when we invoke EasyMotion, it go to state LookingForChar, then we scroll down (caret out of bounds)
+            //then press char - it crash.
             bounds = _wpfTextView.TextViewLines.GetCharacterBounds(point);
 
             var textBox = new TextBox();
