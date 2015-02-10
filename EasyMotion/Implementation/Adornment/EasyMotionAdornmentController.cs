@@ -112,7 +112,9 @@ namespace EasyMotion.Implementation.Adornment
             var textViewLines = _wpfTextView.TextViewLines;
             //create point below caret
             //FIXME: if caret out of bounds - use first line.
-            var startPoint = _wpfTextView.Caret.Position.BufferPosition; //textViewLines.FirstVisibleLine.Start;
+            //get point after caret
+            var snapshot = _wpfTextView.TextSnapshot;
+            var startPoint = new SnapshotPoint(snapshot, _wpfTextView.Caret.Position.BufferPosition.Position + 1);
             var endPoint = textViewLines.LastVisibleLine.End;
 
             AddAdornmentsRegion(startPoint, endPoint);
@@ -145,22 +147,19 @@ namespace EasyMotion.Implementation.Adornment
             int singles = dictSize < hotSpotsCount ? dictSize - groups_count : hotSpotsCount;
 
             int key_idx = 0;
-            try
+
+            for (int i = 0; i < hotSpotsCount; ++i)
             {
-                for (int i = 0; i < hotSpotsCount; ++i)
-                {
-                    string key = NavigationDict[key_idx];
-                    addAdornmentPoint(key, hotSpots[i]);//create view
-                    addToNavigator(key, hotSpots[i]);//create link
-                    //increasing index if i < singles, otherwise - on each group change
-                    if (i < singles)
-                        key_idx++;
-                    else if (i % groupSize == 0)
-                        key_idx++;
-                }
+                string key = NavigationDict[key_idx];
+                addAdornmentPoint(key, hotSpots[i]);//create view
+                addToNavigator(key, hotSpots[i]);//create link
+                //increasing index if i < singles, otherwise - on each group change
+                if (i < singles)
+                    key_idx++;
+                else if (i % groupSize == 0)
+                    key_idx++;
             }
-            catch
-            { }
+
         }
 
         private void addToNavigator(string k, SnapshotPoint p)
@@ -179,7 +178,7 @@ namespace EasyMotion.Implementation.Adornment
             //????
             var snapshot = startPoint.Snapshot;
             List<SnapshotPoint> points = new List<SnapshotPoint>();
-            for (int i = startPoint.Position + 1; i < endPoint.Position; i++)
+            for (int i = startPoint.Position; i <= endPoint.Position; i++)
             {
                 var point = new SnapshotPoint(snapshot, i);
                 if (isCharMatch(point /*, caseSens? */))
@@ -239,10 +238,8 @@ namespace EasyMotion.Implementation.Adornment
         private TextBox CreateHotSpotUI(SnapshotPoint point, string key)
         {
             TextBounds bounds;
-            //catch if user scroll layout so that one point going out of screen.
-            //BUG(only with grouped hotspots): if user scroll layout so that one point going out of screen
             //BUG: when we invoke EasyMotion, it go to state LookingForChar, then we scroll down (caret out of bounds)
-            //then press char - it crash.
+            //then press char - it crash. 
             bounds = _wpfTextView.TextViewLines.GetCharacterBounds(point);
 
             var textBox = new TextBox();
